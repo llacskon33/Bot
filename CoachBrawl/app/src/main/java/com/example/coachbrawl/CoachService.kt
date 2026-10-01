@@ -56,8 +56,13 @@ class CoachService : Service() {
             .setSmallIcon(android.R.drawable.ic_media_play)
             .addAction(Notification.Action.Builder(0, "Detener", stop).build()).build()
         if (Build.VERSION.SDK_INT >= 29) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(1, n)
+        val data = i.getParcelableExtra<Intent>("data")
+        if (data == null) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         val mpm = getSystemService(MediaProjectionManager::class.java)
-        proj = mpm.getMediaProjection(i.getIntExtra("code", 0), i.getParcelableExtra<Intent>("data")!!)
+        proj = mpm.getMediaProjection(i.getIntExtra("code", 0), data)
         proj!!.registerCallback(object : MediaProjection.Callback() { override fun onStop() { stopSelf() } }, h)
         overlay(); setup()
         h.postDelayed(tick, 3000)
@@ -88,11 +93,11 @@ class CoachService : Service() {
         w = nw; hh = nh
         val old = ir
         ir = ImageReader.newInstance(w, hh, PixelFormat.RGBA_8888, 2)
-        if (vd == null) {
-            vd = proj!!.createVirtualDisplay("coach", w, hh, m.densityDpi / 2, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, ir!!.surface, null, null)
-        } else {
-            vd!!.resize(w, hh, m.densityDpi / 2); vd!!.surface = ir!!.surface
-        }
+        vd?.release()
+        vd = proj?.createVirtualDisplay(
+            "coach", w, hh, m.densityDpi / 2,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, ir!!.surface, null, null
+        )
         old?.close()
     }
 
@@ -100,11 +105,15 @@ class CoachService : Service() {
         if (busy) return
         setup()
         val img = ir?.acquireLatestImage() ?: return
-        val pl = img.planes[0]
-        val full = Bitmap.createBitmap(pl.rowStride / pl.pixelStride, img.height, Bitmap.Config.ARGB_8888)
-        full.copyPixelsFromBuffer(pl.buffer)
-        val crop = Bitmap.createBitmap(full, 0, 0, img.width, img.height)
-        img.close()
+        val crop = try {
+            val pl = img.planes[0]
+            val paddedWidth = pl.rowStride / pl.pixelStride
+            val full = Bitmap.createBitmap(paddedWidth, img.height, Bitmap.Config.ARGB_8888)
+            full.copyPixelsFromBuffer(pl.buffer)
+            Bitmap.createBitmap(full, 0, 0, img.width, img.height).also { full.recycle() }
+        } finally {
+            img.close()
+        }
         val o = ByteArrayOutputStream()
         crop.compress(Bitmap.CompressFormat.JPEG, 55, o)
         val b64 = Base64.encodeToString(o.toByteArray(), Base64.NO_WRAP)
@@ -117,6 +126,7 @@ class CoachService : Service() {
 
     private fun ask(b64: String): String {
         val key = getSharedPreferences("c", MODE_PRIVATE).getString("k", "") ?: ""
+        if (key.isBlank()) return "Configura tu clave de Anthropic"
         val img = JSONObject().put("type", "image").put("source",
             JSONObject().put("type", "base64").put("media_type", "image/jpeg").put("data", b64))
         val txt = JSONObject().put("type", "text").put("text", "Dame el consejo ahora.")
@@ -128,9 +138,16 @@ class CoachService : Service() {
         c.setRequestProperty("anthropic-version", "2023-06-01")
         c.setRequestProperty("content-type", "application/json")
         c.outputStream.use { it.write(body.toString().toByteArray()) }
-        if (c.responseCode >= 400) return "Error ${c.responseCode}: revisa tu clave o saldo"
+        if (c.responseCode >= 400) {
+            c.errorStream?.close()
+            return "Error ${c.responseCode}: revisa tu clave o saldo"
+        }
         val s = c.inputStream.bufferedReader().readText()
-        return JSONObject(s).getJSONArray("content").getJSONObject(0).getString("text")
+        return JSONObject(s).optJSONArray("content")
+            ?.optJSONObject(0)
+            ?.optString("text")
+            ?.takeIf { it.isNotBlank() }
+            ?: "No se recibió un consejo válido"
     }
 
     override fun onDestroy() {
