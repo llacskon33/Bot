@@ -10,9 +10,7 @@ jobs:
       - uses: actions/setup-java@v4
         with: {distribution: temurin, java-version: 17}
       - uses: gradle/actions/setup-gradle@v4
-        with: {gradle-version: 8.7}
-      - run: unzip -o CoachBrawl-proyecto-android.zip
-      - run: cd CoachBrawl && gradle assembleDebug
+      - run: ./CoachBrawl/gradlew -p CoachBrawl assembleDebug
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
