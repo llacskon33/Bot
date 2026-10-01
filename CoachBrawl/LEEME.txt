@@ -1,0 +1,6 @@
+COMPILAR:
+1. Abre esta carpeta en Android Studio (Ladybug o más reciente) y espera a que sincronice Gradle.
+2. Build > Build Bundle(s) / APK(s) > Build APK(s). El archivo queda en app/build/outputs/apk/debug/.
+3. Pásalo al móvil e instálalo (activa "instalar apps desconocidas").
+USO: abre Coach Brawl, pega tu clave de la API (console.anthropic.com), pulsa Iniciar y abre Brawl Stars.
+AJUSTES: INTERVAL_MS y MODEL están al inicio de CoachService.kt.
